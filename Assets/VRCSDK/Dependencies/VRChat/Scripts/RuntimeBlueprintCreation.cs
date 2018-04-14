@@ -24,6 +24,8 @@ namespace VRCSDK2
         public Toggle contentGore;
         public Toggle contentOther;
 		public Toggle developerAvatar;
+        public Toggle sharePrivate;
+        public Toggle sharePublic;
 
         public UnityEngine.UI.Button uploadButton;
 
@@ -60,24 +62,22 @@ namespace VRCSDK2
                 delegate(APIUser user) 
                 {
                     pipelineManager.user = user;
-                    if (isUpdate)
-                    {
-                        ApiAvatar.Fetch(pipelineManager.blueprintId, false,
-                            delegate (ApiAvatar avatar)
-                            {
-                                apiAvatar = avatar;
-                                SetupUI();
-                            }, 
-                            delegate(string message) 
-                            {
-                                pipelineManager.blueprintId = "";
-                                SetupUI();
-                            });
-                    }
-                    else
-                    {
-                        SetupUI();
-                    }
+
+                    ApiAvatar.Fetch(pipelineManager.blueprintId, false,
+                        delegate (ApiAvatar avatar)
+                        {
+                            apiAvatar = avatar;
+                            pipelineManager.completedSDKPipeline = !string.IsNullOrEmpty(apiAvatar.authorId);
+                            SetupUI();
+                        },
+                        delegate (string message)
+                        {
+                            apiAvatar = new ApiAvatar();
+                            apiAvatar.id = pipelineManager.blueprintId;
+                            pipelineManager.completedSDKPipeline = false;
+                            SetupUI();
+                        }
+                    );
                 }, LoginErrorCallback);
         }
         
@@ -101,7 +101,9 @@ namespace VRCSDK2
                         contentViolence.isOn = apiAvatar.tags.Contains("content_violence");
                         contentGore.isOn = apiAvatar.tags.Contains("content_gore");
                         contentOther.isOn = apiAvatar.tags.Contains("content_other");
-						developerAvatar.isOn = apiAvatar.tags.Contains("developer");
+                        developerAvatar.isOn = apiAvatar.tags.Contains("developer");
+                        sharePrivate.isOn = apiAvatar.releaseStatus.Contains("private");
+                        sharePublic.isOn = apiAvatar.releaseStatus.Contains("public");
                         blueprintDescription.text = apiAvatar.description;
                         shouldUpdateImageToggle.interactable = true;
                         shouldUpdateImageToggle.isOn = false;
@@ -114,6 +116,7 @@ namespace VRCSDK2
                     }
                     else // user does not own apiAvatar id associated with descriptor
                     {
+                        Debug.LogErrorFormat("{0} is not an owner of {1}", apiAvatar.authorId, pipelineManager.user.id);
                         blueprintPanel.SetActive(false);
                         errorPanel.SetActive(true);
                     }
@@ -155,7 +158,11 @@ namespace VRCSDK2
             UnityEditor.EditorPrefs.SetBool("VRCSDK2_content_gore", contentGore.isOn);
             UnityEditor.EditorPrefs.SetBool("VRCSDK2_content_other", contentOther.isOn);
 
-            string avatarId = isUpdate ? apiAvatar.id : "avatar_new_" + System.Guid.NewGuid().ToString();
+
+            if (string.IsNullOrEmpty(apiAvatar.id))
+                Debug.LogError("avatar export is happening without an ID.");
+
+            string avatarId = apiAvatar.id;
             int version = isUpdate ? apiAvatar.version+1 : 1;
             PrepareVRCPathForS3(abPath, avatarId, version, ApiAvatar.VERSION);
 
@@ -245,19 +252,29 @@ namespace VRCSDK2
                 cloudFrontImageUrl,
                 cloudFrontAssetUrl,
                 blueprintDescription.text,
+                sharePublic.isOn ? "public" : "private",
                 BuildTags(),
                 cloudFrontUnityPackageUrl
                 );
+            avatar.id = pipelineManager.blueprintId;
 
             bool doneUploading = false;
 
-            avatar.Save(delegate(ApiModel model)
-            {
-                ApiAvatar savedBP = (ApiAvatar)model;
-                pipelineManager.blueprintId = savedBP.id;
-                UnityEditor.EditorPrefs.SetString("blueprintID-" + pipelineManager.GetInstanceID().ToString(), savedBP.id);
-                doneUploading = true;
-            });
+            avatar.Save( false, 
+                delegate(ApiModel model)
+                {
+                    ApiAvatar savedBP = (ApiAvatar)model;
+                    pipelineManager.blueprintId = savedBP.id;
+                    UnityEditor.EditorPrefs.SetString("blueprintID-" + pipelineManager.GetInstanceID().ToString(), savedBP.id);
+
+                    AnalyticsSDK.AvatarUploaded(model, false);
+                    doneUploading = true;
+                },
+                delegate( string error )
+                {
+                    Debug.LogError(error);
+                    doneUploading = true;
+                });
 
             while (!doneUploading)
                 yield return null;
@@ -270,6 +287,7 @@ namespace VRCSDK2
             apiAvatar.name = blueprintName.text;
             apiAvatar.description = blueprintDescription.text;
             apiAvatar.assetUrl = cloudFrontAssetUrl;
+            apiAvatar.releaseStatus = sharePublic.isOn ? "public" : "private";
             apiAvatar.tags = BuildTags();
             apiAvatar.unityPackageUrl = cloudFrontUnityPackageUrl;
 			apiAvatar.UpdateVersionAndPlatform();
@@ -278,20 +296,14 @@ namespace VRCSDK2
             {
                 yield return StartCoroutine(UpdateImage(isUpdate ? apiAvatar.imageUrl : "", GetFriendlyAvatarFileName("Image")));
                 apiAvatar.imageUrl = cloudFrontImageUrl;
-                SetUploadProgress("Saving Avatar", "Almost finished!!", 0.8f);
-                apiAvatar.Save(delegate(ApiModel model) 
-                {
-                    doneUploading = true;
-                });
             }
-            else
+
+            SetUploadProgress("Saving Avatar", "Almost finished!!", 0.8f);
+            apiAvatar.Save(true, delegate(ApiModel model) 
             {
-                SetUploadProgress("Saving Avatar", "Almost finished!!", 0.8f);
-                apiAvatar.Save(delegate(ApiModel model) 
-                {
-                    doneUploading = true;
-                });
-            }
+                AnalyticsSDK.AvatarUploaded(model, true);
+                doneUploading = true;
+            });
 
             while (!doneUploading)
                 yield return null;

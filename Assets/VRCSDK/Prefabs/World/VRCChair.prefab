@@ -317,7 +317,7 @@ MonoBehaviour:
   interactTextPlacement: {fileID: 0}
   interactText: Use
   interactTextGO: {fileID: 0}
-  proximity: 100
+  proximity: 2
   isHidden: 0
   UsesAdvancedOptions: 0
   ShowHelp: 1

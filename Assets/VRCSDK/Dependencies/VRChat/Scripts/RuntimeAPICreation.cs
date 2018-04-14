@@ -35,7 +35,7 @@ namespace VRCSDK2
 
         private Dictionary<string, string> mRetryState = new Dictionary<string, string>();
 
-        protected bool isUpdate { get { return !string.IsNullOrEmpty(pipelineManager.blueprintId); } }
+        protected bool isUpdate { get { return pipelineManager.completedSDKPipeline; } }
 
 #if UNITY_EDITOR
         protected void Start()

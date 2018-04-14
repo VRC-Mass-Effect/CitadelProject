@@ -80,24 +80,20 @@ namespace VRCSDK2
         {
             pipelineManager.user = user;
 
-            if (isUpdate)
-            {
-                ApiWorld.Fetch(pipelineManager.blueprintId, false,
-                    delegate (ApiWorld world)
-                    {
-                        worldRecord = world;
-                        SetupUI();
-                    },
-                    delegate (string message)
-                    {
-                        pipelineManager.blueprintId = "";
-                        SetupUI();
-                    });
-            }
-            else
-            {
-                SetupUI();
-            }
+            ApiWorld.Fetch(pipelineManager.blueprintId, false,
+                delegate (ApiWorld world)
+                {
+                    worldRecord = world;
+                    pipelineManager.completedSDKPipeline = !string.IsNullOrEmpty(worldRecord.authorId);
+                    SetupUI();
+                },
+                delegate (string message)
+                {
+                    worldRecord = new ApiWorld { capacity = 8 };
+                    pipelineManager.completedSDKPipeline = false;
+                    worldRecord.id = pipelineManager.blueprintId;
+                    SetupUI();
+                });
         }
 
         void SetupUI()
@@ -119,96 +115,60 @@ namespace VRCSDK2
                 blueprintPanel.SetActive(true);
                 errorPanel.SetActive(false);
 
-                if (isUpdate)
+                if (string.IsNullOrEmpty(worldRecord.authorId ) || worldRecord.authorId == pipelineManager.user.id)
                 {
-                    // bp update
-                    if (worldRecord.authorId == pipelineManager.user.id)
+                    titleText.text = "Configure World";
+                    blueprintName.text = worldRecord.name;
+                    worldCapacity.text = worldRecord.capacity.ToString();
+                    contentSex.isOn = worldRecord.tags.Contains("content_sex");
+                    contentViolence.isOn = worldRecord.tags.Contains("content_violence");
+                    contentGore.isOn = worldRecord.tags.Contains("content_gore");
+                    contentOther.isOn = worldRecord.tags.Contains("content_other");
+                    shouldUpdateImageToggle.interactable = isUpdate;
+                    shouldUpdateImageToggle.isOn = !isUpdate;
+                    liveBpImage.enabled = !isUpdate;
+                    bpImage.enabled = isUpdate;
+
+                    if (APIUser.CurrentUser.developerType < APIUser.DeveloperType.Trusted)
                     {
-						titleText.text = "Update World";
-                        blueprintName.text = worldRecord.name;
-                        worldCapacity.text = worldRecord.capacity.ToString();
-                        contentSex.isOn = worldRecord.tags.Contains("content_sex");
-                        contentViolence.isOn = worldRecord.tags.Contains("content_violence");
-                        contentGore.isOn = worldRecord.tags.Contains("content_gore");
-                        contentOther.isOn = worldRecord.tags.Contains("content_other");
-
-						if(APIUser.CurrentUser.developerType < APIUser.DeveloperType.Trusted)
-                        {
-                            releasePublic.gameObject.SetActive(false);
-                            releasePublic.isOn = false;
-                            releasePublic.interactable = false;
-
-							contentFeatured.isOn = contentSDKExample.isOn = false;
-						}
-                        else
-                        {
-							contentFeatured.isOn = worldRecord.tags.Contains("content_featured");
-							contentSDKExample.isOn = worldRecord.tags.Contains("content_sdk_example");
-                            releasePublic.isOn = worldRecord.releaseStatus == "public";
-                            releasePublic.gameObject.SetActive(true);
-                        }
-
-                        // "show in worlds menu"
-                        if (APIUser.CurrentUser.developerType == APIUser.DeveloperType.Internal)
-                        {
-                            showInWorldsMenuGroup.gameObject.SetActive(true);
-                            showInActiveWorlds.isOn = !worldRecord.tags.Contains("admin_hide_active");
-                            showInPopularWorlds.isOn = !worldRecord.tags.Contains("admin_hide_popular");
-                            showInNewWorlds.isOn = !worldRecord.tags.Contains("admin_hide_new");
-                        }
-                        else
-                        {
-                            showInWorldsMenuGroup.gameObject.SetActive(false);
-                        }
-
-                        blueprintDescription.text = worldRecord.description;
-                        shouldUpdateImageToggle.interactable = true;
-                        shouldUpdateImageToggle.isOn = false;
-                        liveBpImage.enabled = false;
-                        bpImage.enabled = true;
-
-                        ImageDownloader.DownloadImage(worldRecord.imageUrl, delegate(Texture2D obj) {
-                            bpImage.texture = obj;
-                        });
-                    }
-                    else // user does not own world id associated with descriptor
-                    {
-                        blueprintPanel.SetActive(false);
-                        errorPanel.SetActive(true);
-                    }
-                }
-                else
-                {
-					titleText.text = "New World";
-                    shouldUpdateImageToggle.interactable = false;
-                    shouldUpdateImageToggle.isOn = true;
-                    liveBpImage.enabled = true;
-                    bpImage.enabled = false;
-
-					if (APIUser.CurrentUser.developerType < APIUser.DeveloperType.Trusted)
-					{
                         releasePublic.gameObject.SetActive(false);
                         releasePublic.isOn = false;
-						releasePublic.interactable = false;
-					}
-					else
-					{
+                        releasePublic.interactable = false;
+
+                        contentFeatured.isOn = contentSDKExample.isOn = false;
+                    }
+                    else
+                    {
+                        contentFeatured.isOn = worldRecord.tags.Contains("content_featured");
+                        contentSDKExample.isOn = worldRecord.tags.Contains("content_sdk_example");
+                        releasePublic.isOn = worldRecord.releaseStatus == "public";
                         releasePublic.gameObject.SetActive(true);
-                        releasePublic.isOn = false;
-					}
+                    }
 
                     // "show in worlds menu"
                     if (APIUser.CurrentUser.developerType == APIUser.DeveloperType.Internal)
                     {
                         showInWorldsMenuGroup.gameObject.SetActive(true);
-                        showInActiveWorlds.isOn = true;
-                        showInPopularWorlds.isOn = true;
-                        showInNewWorlds.isOn = true;
+                        showInActiveWorlds.isOn = !worldRecord.tags.Contains("admin_hide_active");
+                        showInPopularWorlds.isOn = !worldRecord.tags.Contains("admin_hide_popular");
+                        showInNewWorlds.isOn = !worldRecord.tags.Contains("admin_hide_new");
                     }
                     else
                     {
                         showInWorldsMenuGroup.gameObject.SetActive(false);
                     }
+
+                    blueprintDescription.text = worldRecord.description;
+
+                    ImageDownloader.DownloadImage(worldRecord.imageUrl, delegate (Texture2D obj) {
+                        bpImage.texture = obj;
+                    });
+                }
+                else // user does not own world id associated with descriptor
+                {
+                    Debug.LogErrorFormat("{0} is not an owner of {1}", worldRecord.authorId, pipelineManager.user.id);
+                    blueprintPanel.SetActive(false);
+                    errorPanel.SetActive(true);
                 }
             }
             else
@@ -255,7 +215,9 @@ namespace VRCSDK2
             UnityEditor.EditorPrefs.SetBool("VRCSDK2_content_featured", contentFeatured.isOn);
             UnityEditor.EditorPrefs.SetBool("VRCSDK2_content_sdk_example", contentSDKExample.isOn);
 
-            string blueprintId = isUpdate ? worldRecord.id : "world_new_" + System.Guid.NewGuid().ToString();
+            if (string.IsNullOrEmpty(worldRecord.id))
+                Debug.LogError("world export is happening without an ID.");
+            string blueprintId = worldRecord.id;
             int version = isUpdate ? worldRecord.version+1 : 1;
             PrepareVRCPathForS3(abPath, blueprintId, version, ApiWorld.VERSION);
 
@@ -387,6 +349,7 @@ namespace VRCSDK2
                 cloudFrontPluginUrl,
 				cloudFrontUnityPackageUrl
                 );
+            world.id = pipelineManager.blueprintId;
 
             if(APIUser.CurrentUser.developerType > APIUser.DeveloperType.None)
                 world.isCurated = contentFeatured.isOn || contentSDKExample.isOn;
@@ -394,14 +357,21 @@ namespace VRCSDK2
                 world.isCurated = false;
 
             bool doneUploading = false;
-            world.SaveAndAddToUser(delegate(ApiModel model)
-            {
-                ApiWorld savedBP = (ApiWorld)model;
-                pipelineManager.blueprintId = savedBP.id;
-                UnityEditor.EditorPrefs.SetString("blueprintID-" + pipelineManager.GetInstanceID().ToString(), savedBP.id);
-                Debug.Log("Setting blueprintID on pipeline manager and editor prefs");
-                doneUploading = true;
-            });
+            world.SaveAndAddToUser( false, 
+                delegate(ApiModel model)
+                {
+                    ApiWorld savedBP = (ApiWorld)model;
+                    // pipelineManager.blueprintId = savedBP.id;
+                    UnityEditor.EditorPrefs.SetString("blueprintID-" + pipelineManager.GetInstanceID().ToString(), savedBP.id);
+                    Debug.Log("Setting blueprintID on pipeline manager and editor prefs");
+                    AnalyticsSDK.WorldUploaded(model, false);
+                    doneUploading = true;
+                },
+                delegate(string error)
+                {
+                    Debug.LogError(error);
+                    doneUploading = true;
+                });
 
             while(!doneUploading)
                 yield return null;
@@ -428,16 +398,18 @@ namespace VRCSDK2
 
                 worldRecord.imageUrl = cloudFrontImageUrl;
                 SetUploadProgress("Saving Blueprint", "Almost finished!!", 0.0f);
-                worldRecord.Save(delegate (ApiModel model)
+                worldRecord.Save(true, delegate (ApiModel model)
                 {
+                    AnalyticsSDK.WorldUploaded(model, true);
                     doneUploading = true;
                 });
             }
             else
             {
                 SetUploadProgress("Saving Blueprint", "Almost finished!!", 0.0f);
-                worldRecord.Save(delegate (ApiModel model)
+                worldRecord.Save(true, delegate (ApiModel model)
                 {
+                    AnalyticsSDK.WorldUploaded(model, true);
                     doneUploading = true;
                 });
             }

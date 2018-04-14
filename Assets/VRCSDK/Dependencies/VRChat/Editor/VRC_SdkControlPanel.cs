@@ -57,7 +57,6 @@ public class VRC_SdkControlPanel : EditorWindow
     Dictionary<Object, List<string>> GUIWarnings = new Dictionary<Object, List<string>>();
     Dictionary<Object, List<string>> GUIInfos = new Dictionary<Object, List<string>>();
     Dictionary<Object, List<string>> GUILinks = new Dictionary<Object, List<string>>();
-    Dictionary<VRCSDK2.VRC_AvatarDescriptor, bool> displayActive = new Dictionary<VRCSDK2.VRC_AvatarDescriptor, bool>();
 
     void AddToReport(Dictionary<Object, List<string>> report, Object subject, string output)
     {
@@ -145,7 +144,7 @@ public class VRC_SdkControlPanel : EditorWindow
 
         ShowBuildControls();
 
-        window.Repaint();
+        //window.Repaint();
     }
 
     void ShowBuildControls()
@@ -222,29 +221,22 @@ public class VRC_SdkControlPanel : EditorWindow
         {
             GUILayout.Label("Avatar Options", EditorStyles.boldLabel);
             scrollPos = EditorGUILayout.BeginScrollView(scrollPos);
-            if (!checkedForIssues)
-                foreach (var av in avatars)
-                {
-                    EditorGUI.BeginChangeCheck();
+            foreach (var av in avatars)
+            {
+                EditorGUI.BeginChangeCheck();
 
-                    EditorGUILayout.Space();
+                EditorGUILayout.Space();
+                if (!checkedForIssues)
                     OnGUIAvatarCheck(av);
 
-                    OnGUIAvatar(av);
+                OnGUIAvatar(av);
 
-                    if (EditorGUI.EndChangeCheck())
-                    {
-                        EditorUtility.SetDirty(av);
-                        UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(UnityEditor.SceneManagement.EditorSceneManager.GetActiveScene());
-                    }
-                }
-            else
-                foreach (var av in avatars)
+                if (EditorGUI.EndChangeCheck())
                 {
-                    if (!displayActive.ContainsKey(av))
-                        displayActive.Add(av, true);
-                    OnGUIAvatar(av);
+                    EditorUtility.SetDirty(av);
+                    UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(UnityEditor.SceneManagement.EditorSceneManager.GetActiveScene());
                 }
+            }
             EditorGUILayout.EndScrollView();
         }
         else
@@ -329,16 +321,16 @@ public class VRC_SdkControlPanel : EditorWindow
             subject = this;
 
         if (GUIErrors.ContainsKey(subject))
-            foreach (string error in GUIErrors[subject])
+            foreach (string error in GUIErrors[subject].Where(s => !string.IsNullOrEmpty(s)))
                 EditorGUILayout.HelpBox(error, MessageType.Error);
         if (GUIWarnings.ContainsKey(subject))
-            foreach (string error in GUIWarnings[subject])
+            foreach (string error in GUIWarnings[subject].Where(s => !string.IsNullOrEmpty(s)))
                 EditorGUILayout.HelpBox(error, MessageType.Warning);
         if (GUIInfos.ContainsKey(subject))
-            foreach (string error in GUIInfos[subject])
+            foreach (string error in GUIInfos[subject].Where(s => !string.IsNullOrEmpty(s)))
                 EditorGUILayout.HelpBox(error, MessageType.Info);
         if (GUILinks.ContainsKey(subject))
-            foreach (string error in GUILinks[subject])
+            foreach (string error in GUILinks[subject].Where(s => !string.IsNullOrEmpty(s)))
                 EditorGUILayout.SelectableLabel(error);
     }
 
@@ -477,6 +469,7 @@ public class VRC_SdkControlPanel : EditorWindow
         {
             EnvConfig.ConfigurePlayerSettings();
             VRC_SdkBuilder.shouldBuildUnityPackage = false;
+            VRC.AssetExporter.CleanupUnityPackageExport();  // force unity package rebuild on next publish
             VRC_SdkBuilder.numClientsToLaunch = numClients;
             VRC_SdkBuilder.PreBuildBehaviourPackaging();
             VRC_SdkBuilder.ExportSceneResourceAndRun();
@@ -924,24 +917,19 @@ public class VRC_SdkControlPanel : EditorWindow
                 OnGUILink(avatar, "See https://docs.vrchat.com/docs/rig-requirements for details."); 
         }
 
+        IEnumerable<Component> componentsToRemove = VRCSDK2.AvatarValidation.FindIllegalComponents(avatar.Name, avatar.gameObject);
+        HashSet<string> componentsToRemoveNames = new HashSet<string>();
+        foreach (Component c in componentsToRemove)
         {
-            IEnumerable<Component> componentsToRemove = VRCSDK2.AvatarValidation.FindIllegalComponents(avatar.Name, avatar.gameObject);
-            HashSet<string> componentsToRemoveNames = new HashSet<string>();
-            foreach (Component c in componentsToRemove)
-            {
-                if (componentsToRemoveNames.Contains(c.GetType().Name) == false)
-                    componentsToRemoveNames.Add(c.GetType().Name);
-            }
-
-            if (componentsToRemoveNames.Count > 0)
-                OnGUIError(avatar, "The following component types are found on the Avatar and will be removed by the client: " + string.Join(", ", componentsToRemoveNames.ToArray()));
+            if (componentsToRemoveNames.Contains(c.GetType().Name) == false)
+                componentsToRemoveNames.Add(c.GetType().Name);
         }
 
-        int found_count;
-        if (VRCSDK2.AvatarValidation.EnforceAudioSourceLimits(avatar.gameObject, out found_count))
+        if (componentsToRemoveNames.Count > 0)
+            OnGUIError(avatar, "The following component types are found on the Avatar and will be removed by the client: " + string.Join(", ", componentsToRemoveNames.ToArray()));
+
+        if (VRCSDK2.AvatarValidation.EnforceAudioSourceLimits(avatar.gameObject).Count > 0)
             OnGUIWarning(avatar, "Audio sources found on Avatar, they will be adjusted to safe limits, if necessary.");
-        if (found_count > 10)
-            OnGUIWarning(avatar, "You have many Audio Sources on your avatar, and so may experience audio issues.");
 
         if (avatar.gameObject.GetComponentInChildren<Camera>() != null)
             OnGUIWarning(avatar, "Cameras are removed from non-local avatars at runtime.");
@@ -949,23 +937,18 @@ public class VRC_SdkControlPanel : EditorWindow
 
     void OnGUIAvatar(VRCSDK2.VRC_AvatarDescriptor avatar)
     {
-        if (!displayActive.ContainsKey(avatar))
-            displayActive.Add(avatar, true);
-        displayActive[avatar] = EditorGUILayout.InspectorTitlebar(displayActive[avatar], avatar.gameObject);
+        EditorGUILayout.InspectorTitlebar(avatar.gameObject.activeInHierarchy, avatar.gameObject);
 
-        if (displayActive[avatar])
+        GUI.enabled = (GUIErrors.Count == 0 && checkedForIssues) || (APIUser.CurrentUser.developerType.HasValue && APIUser.CurrentUser.developerType.Value == APIUser.DeveloperType.Internal);
+        EditorGUILayout.BeginHorizontal();
+        if (GUILayout.Button("Build & Publish"))
         {
-            GUI.enabled = (GUIErrors.Count == 0 && checkedForIssues) || (APIUser.CurrentUser.developerType.HasValue && APIUser.CurrentUser.developerType.Value == APIUser.DeveloperType.Internal);
-            EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("Build & Publish"))
-            {
-                VRC_SdkBuilder.shouldBuildUnityPackage = VRC.AccountEditorWindow.FutureProofPublishEnabled;
-                VRC_SdkBuilder.ExportAndUploadAvatarBlueprint(avatar.gameObject);
-            }
-            EditorGUILayout.EndHorizontal();
-            GUI.enabled = true;
-
-            OnGUIShowIssues(avatar);
+            VRC_SdkBuilder.shouldBuildUnityPackage = VRC.AccountEditorWindow.FutureProofPublishEnabled;
+            VRC_SdkBuilder.ExportAndUploadAvatarBlueprint(avatar.gameObject);
         }
+        EditorGUILayout.EndHorizontal();
+        GUI.enabled = true;
+
+        OnGUIShowIssues(avatar);
     }
 }

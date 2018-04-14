@@ -60,6 +60,7 @@ namespace VRCSDK2
             "UnityEngine.GUILayer",
             "UnityEngine.AudioSource",
             "ONSPAudioSource",
+            "AvatarCustomAudioLimiter",
             "UnityEngine.EllipsoidParticleEmitter",
             "UnityEngine.ParticleRenderer",
             "UnityEngine.ParticleAnimator",
@@ -137,10 +138,10 @@ namespace VRCSDK2
             }
         }
 
-        public static bool EnforceAudioSourceLimits(GameObject currentAvatar, out int found_count)
+        public static List<AudioSource> EnforceAudioSourceLimits(GameObject currentAvatar)
         {
-            found_count = 0;
-            bool found = false;
+            List<AudioSource> audioSources = new List<AudioSource>();
+
             Queue<GameObject> children = new Queue<GameObject>();
             children.Enqueue(currentAvatar.gameObject);
             while (children.Count > 0)
@@ -149,33 +150,100 @@ namespace VRCSDK2
                 int childCount = child.transform.childCount;
                 for (int idx = 0; idx < child.transform.childCount; ++idx)
                     children.Enqueue(child.transform.GetChild(idx).gameObject);
+
 #if VRC_CLIENT
-                if (child.transform.GetComponent<USpeakPhotonSender3D>() != null)
+                if (child.GetComponent<USpeaker>() != null)
                     continue;
 #endif
-                foreach (AudioSource au in child.transform.GetComponents<AudioSource>())
+
+                AudioSource[] sources = child.transform.GetComponents<AudioSource>();
+                if (sources != null && sources.Length > 0)
                 {
-                    if (au.volume > 0.5f) au.volume = 0.5f;
+                    AudioSource au = sources[0];
+#if VRC_CLIENT
+                    au.outputAudioMixerGroup = VRCAudioManager.GetGameGroup();
+#endif
+
+                    if (au.volume > 0.9f)
+                        au.volume = 0.9f;
+
+#if VRC_CLIENT
+                    // someone mucked with the sdk forced settings, shame on them!
+                    if (au.spatialize == false)
+                        au.volume = 0;
+#else
                     au.spatialize = true;
+#endif
+                    au.priority = Mathf.Clamp(au.priority, 200, 255);
                     au.bypassEffects = false;
                     au.bypassListenerEffects = false;
                     au.spatialBlend = 1f;
-                    au.priority = Mathf.Clamp(au.priority, 11, 255);
-                    ONSPAudioSource oa = au.gameObject.GetOrAddComponent<ONSPAudioSource>();
-                    oa.enabled = true;
-                    if (oa.Gain > 10f) oa.Gain = 10f;
-                    if (oa.Near > 2f) oa.Near = 2f;
-                    if (oa.Far > 70f) oa.Far = 70f;
-                    oa.UseInvSqr = true; // This is the ENABLED value for OCULUS ATTENUATION
-                    oa.EnableSpatialization = true;
-                    oa.EnableRfl = false;
-                    oa.VolumetricRadius = 0f;
-                    found = true;
-                    found_count++;
+                    au.spread = 0;
+
+                    au.minDistance = Mathf.Clamp(au.minDistance, 0, 2);
+                    au.maxDistance = Mathf.Clamp(au.maxDistance, 0, 30);
+
+                    float range = au.maxDistance - au.minDistance;
+                    float min = au.minDistance;
+                    float max = au.maxDistance;
+                    float mult = 50.0f/range;
+
+                    // setup a custom rolloff curve
+                    Keyframe[] keys = new Keyframe[7];
+                    keys[0] = new Keyframe(0, 1);
+                    keys[1] = new Keyframe(min, 1, 0, -0.4f * mult);
+                    keys[2] = new Keyframe(min + 0.022f * range, 0.668f, -0.2f * mult, -0.2f * mult);
+                    keys[3] = new Keyframe(min + 0.078f * range, 0.359f, -0.05f * mult, -0.05f * mult);
+                    keys[4] = new Keyframe(min + 0.292f * range, 0.102f, -0.01f * mult, -0.01f * mult);
+                    keys[5] = new Keyframe(min + 0.625f * range, 0.025f, -0.002f * mult, -0.002f * mult);
+                    keys[6] = new Keyframe(max, 0);
+                    AnimationCurve curve = new AnimationCurve(keys);
+
+                    au.rolloffMode = AudioRolloffMode.Custom;
+                    au.SetCustomCurve(AudioSourceCurveType.CustomRolloff, curve);
+
+                    // if we have an onsp component, also configure that
+                    ONSPAudioSource oa = sources[0].GetComponent<ONSPAudioSource>();
+                    if (oa)
+                    {
+                        if (oa.Gain > 10f) oa.Gain = 10f;
+#if VRC_CLIENT
+                        // someone mucked with the sdk forced settings, shame on them!
+                        if (oa.enabled == false || oa.EnableSpatialization == false)
+                        {
+                            oa.Gain = 0f;
+                            au.volume = 0f;
+                        }
+#else
+                        oa.enabled = true;
+                        oa.EnableSpatialization = true;
+#endif
+                        oa.UseInvSqr = true; // This is the ENABLED value for OCULUS ATTENUATION
+                        oa.EnableRfl = false;
+                        if (oa.Near > 2f) oa.Near = 2f;
+                        if (oa.Far > 30f) oa.Far = 30f;
+                        oa.VolumetricRadius = 0f;
+                    }
+
+                    audioSources.Add(au);
+
+                    if (sources.Length > 1)
+                    {
+                        Debug.LogError("Disabling extra AudioSources on GameObject("+ child.name +"). Only one is allowed per GameObject.");
+                        for (int i=1; i<sources.Length; i++)
+                        {
+#if VRC_CLIENT
+                            sources[i].enabled = false;
+                            sources[i].clip = null;
+#else
+                            Object.DestroyImmediate(sources[i]);
+#endif
+                        }
+                    }
                 }
             }
 
-            return found;
+            return audioSources;
         }
     }
 }

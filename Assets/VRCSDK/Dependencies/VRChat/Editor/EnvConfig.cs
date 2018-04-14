@@ -183,6 +183,8 @@ public class EnvConfig
 
 		// default to steam runtime in sdk (shouldn't matter)
 		SetVRSDKs(new string[] { "None", "OpenVR", "Oculus" });
+
+        VRC.Core.AnalyticsSDK.Initialize(VRC.Core.SDKClientUtilities.GetSDKVersionDate());
 #endif
     }
 
